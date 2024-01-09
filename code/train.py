@@ -300,18 +300,19 @@ def main():
               epoch, batch_idx + 1, len(dl_tr),
               100. * batch_idx / len(dl_tr),
               loss.item()))
+      # break
 
     losses_list.append(np.mean(losses_per_epoch))
     wandb.log({'loss': losses_list[-1]}, step=epoch)
     scheduler.step()
 
-    if (epoch >= 0):
+    if (epoch == 0 or epoch == 9 or epoch == 49 or epoch == 99):
       with torch.no_grad():
         print("**Evaluating...**")
         if args.dataset == 'Inshop':
           Recalls = utils.evaluate_cos_Inshop(model, dl_query, dl_gallery)
         elif args.dataset != 'SOP':
-          Recalls = utils.evaluate_cos(model, dl_ev)
+          Recalls = utils.evaluate_cos(model, dl_ev, criterion)
         else:
           Recalls = utils.evaluate_cos_SOP(model, dl_ev)
 

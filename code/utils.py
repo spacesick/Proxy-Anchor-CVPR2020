@@ -28,35 +28,62 @@ def calc_recall_at_k(T, Y, k):
 
   s = 0
   for t, y in zip(T, Y):
-    if t in torch.Tensor(y).long()[:k]:
+    if t in torch.Tensor(y).to("cuda").long()[:k]:
       s += 1
   return s / (1. * len(T))
 
 
-def predict_batchwise(model, dataloader):
+def predict_batchwise(model, dataloader, loss_func):
   device = "cuda"
   model_is_training = model.training
   model.eval()
 
-  ds = dataloader.dataset
-  A = [[] for i in range(len(ds[0]))]
-  with torch.no_grad():
-    # extract batches (A becomes list of samples)
-    for batch in tqdm(dataloader):
-      for i, J in enumerate(batch):
-        # i = 0: sz_batch * images
-        # i = 1: sz_batch * labels
-        # i = 2: sz_batch * indices
-        if i == 0:
-          # move images to device of model (approximate device)
-          J = model(J.cuda())
+  # ds = dataloader.dataset
+  # A = [[] for i in range(len(ds[0]))]
+  # with torch.no_grad():
+  #   # extract batches (A becomes list of samples)
+  #   for batch in tqdm(dataloader):
+  #     for i, J in enumerate(batch):
+  #       # i = 0: sz_batch * images
+  #       # i = 1: sz_batch * labels
+  #       # i = 2: sz_batch * indices
+  #       if i == 0:
+  #         # move images to device of model (approximate device)
+  #         J = model(J.cuda())
+  #         loss = loss_func(J, J)
 
-        for j in J:
-          A[i].append(j)
-  model.train()
-  model.train(model_is_training)  # revert to previous training state
+  #       for j in J:
+  #         A[i].append(j)
+  # model.train()
+  # model.train(model_is_training)  # revert to previous training state
 
-  return [torch.stack(A[i]) for i in range(len(A))]
+  # return [torch.stack(A[i]) for i in range(len(A))]
+
+  progress_bar = tqdm(enumerate(dataloader), total=len(dataloader))
+  labels = []
+  tst_losses = []
+  embeddings = []
+  for _, (x_batch, y_batch) in progress_bar:
+    model_output = model(x_batch.squeeze().to(device))
+
+    y = y_batch.squeeze().to(device)
+    loss = loss_func(model_output, y)
+
+    if not torch.isnan(loss).item() and not torch.isinf(loss).item():
+      tst_losses.append(loss.item())
+
+    progress_bar.set_description(
+        f'EVALUATING - Loss = {loss.item():>.3f}'
+    )
+
+    embeddings.append(model_output)
+    labels.append(y)
+
+  print(f'Test Loss: {np.mean(tst_losses):>.3f}')
+
+  model.train(model_is_training)
+
+  return torch.cat(embeddings), torch.cat(labels)
 
 
 def proxy_init_calc(model, dataloader):
@@ -68,11 +95,11 @@ def proxy_init_calc(model, dataloader):
   return proxy_mean
 
 
-def evaluate_cos(model, dataloader):
+def evaluate_cos(model, dataloader, loss_func):
   nb_classes = dataloader.dataset.num_classes()
 
   # calculate embeddings with model and get targets
-  X, T = predict_batchwise(model, dataloader)
+  X, T = predict_batchwise(model, dataloader, loss_func)
   X = l2_norm(X)
 
   # get predictions by assigning nearest 8 neighbors with cosine
@@ -81,7 +108,7 @@ def evaluate_cos(model, dataloader):
   xs = []
 
   cos_sim = F.linear(X, X).to('cpu')
-  Y = T[cos_sim.topk(1 + K)[1][:, 1:]]
+  Y = T[cos_sim.topk(65)[1][:, 1:]]
   Y = Y.float().cpu()
 
   recall = []
